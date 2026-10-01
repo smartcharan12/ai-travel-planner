@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Secrets — never commit real keys. Only .env.example belongs in Git.
+.env
+.env.*
+!.env.example
+*.pem
+*-key.json
+service-account*.json
+
+# Evaluation outputs (generated, may contain model output)
+evaluation/results/
+.deepeval/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store

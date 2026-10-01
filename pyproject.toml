@@ -1,0 +1,28 @@
+[project]
+name = "ai-travel-planner"
+version = "0.1.0"
+description = "AI travel itinerary planner: FastAPI + LangGraph + real-time search, with LLMOps tooling."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+# Dependencies are pinned in requirements.txt / requirements-dev.txt so that
+# Docker, CI and local installs all resolve to identical versions.
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = [".venv"]
+
+[tool.ruff.lint]
+# E/F = pycodestyle + pyflakes, I = import sorting, B = common bugs,
+# UP = modern syntax, SIM = simplifications.
+select = ["E", "F", "I", "B", "UP", "SIM"]
+ignore = ["B008"]  # FastAPI's Depends() in default arguments is idiomatic.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "integration: needs real external services (API keys); skipped in CI by default",
+]
