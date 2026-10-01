@@ -1,0 +1,3 @@
+# Offline LLM evaluation tooling. NOT installed in the API or frontend images.
+-r requirements-dev.txt
+deepeval==4.2.7

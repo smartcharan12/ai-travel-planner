@@ -1,0 +1,126 @@
+{
+  "dataset": "travel-planner-eval-v1",
+  "note": "Fixed evaluation INPUTS written by the developer. They contain no API results and no expected itineraries: the model output is generated at evaluation time and scored by the metrics. 'start_in_days' is converted to a date relative to the day the evaluation runs.",
+  "cases": [
+    {
+      "id": "goa_couple_beaches",
+      "description": "Classic couple trip: beaches, food and nightlife on a moderate budget.",
+      "tags": ["goa", "couple", "mid_range"],
+      "request": {
+        "destination": "Goa", "origin_city": "Bengaluru", "num_days": 4, "start_in_days": 30,
+        "budget": 25000, "currency": "INR", "num_travelers": 2,
+        "preferences": {"travel_style": "couple", "pace": "moderate", "interests": ["beaches", "food", "nightlife"],
+                        "transport": ["train"], "accommodation": "mid_range"}
+      },
+      "expected_behavior": "4 grounded days covering beaches, food and nightlife; budget lines add up; over-budget is flagged rather than hidden."
+    },
+    {
+      "id": "goa_budget_solo",
+      "description": "Low-budget solo traveller on a relaxed pace.",
+      "tags": ["goa", "solo", "budget"],
+      "request": {
+        "destination": "Goa", "origin_city": "Pune", "num_days": 3,
+        "budget": 8000, "currency": "INR", "num_travelers": 1,
+        "preferences": {"travel_style": "solo", "pace": "relaxed", "interests": ["beaches"],
+                        "transport": ["bus"], "accommodation": "hostel"}
+      },
+      "expected_behavior": "At most 3 activities per day; hostel budget priced per bed; a tight budget is reported honestly."
+    },
+    {
+      "id": "hyderabad_family_food_history",
+      "description": "Vegetarian family of four interested in history and food.",
+      "tags": ["hyderabad", "family", "dietary"],
+      "request": {
+        "destination": "Hyderabad", "origin_city": "Chennai", "num_days": 3,
+        "budget": 40000, "currency": "INR", "num_travelers": 4,
+        "preferences": {"travel_style": "family", "pace": "relaxed", "interests": ["history", "food"],
+                        "dietary": ["vegetarian"], "transport": ["flight"], "accommodation": "mid_range"}
+      },
+      "expected_behavior": "Historic sites and food covered; vegetarian suitability either confirmed by sources or flagged as unverified; 2 rooms for 4 travellers."
+    },
+    {
+      "id": "jaipur_luxury_couple",
+      "description": "Luxury couple trip focused on heritage, culture and shopping.",
+      "tags": ["jaipur", "couple", "luxury"],
+      "request": {
+        "destination": "Jaipur", "origin_city": "Delhi", "num_days": 3,
+        "budget": 120000, "currency": "INR", "num_travelers": 2,
+        "preferences": {"travel_style": "couple", "pace": "moderate", "interests": ["history", "culture", "shopping"],
+                        "transport": ["car"], "accommodation": "luxury"}
+      },
+      "expected_behavior": "Heritage and shopping activities from verified places; luxury accommodation budget; no invented palaces or markets."
+    },
+    {
+      "id": "jaipur_solo_budget_history",
+      "description": "Short, packed solo history trip on a small budget.",
+      "tags": ["jaipur", "solo", "budget", "packed"],
+      "request": {
+        "destination": "Jaipur", "num_days": 2,
+        "budget": 6000, "currency": "INR", "num_travelers": 1,
+        "preferences": {"travel_style": "solo", "pace": "packed", "interests": ["history"],
+                        "transport": ["train"], "accommodation": "hostel"}
+      },
+      "expected_behavior": "No origin city, so intercity travel is excluded and stated; up to 5 activities per day; history covered."
+    },
+    {
+      "id": "delhi_family_history",
+      "description": "Vegetarian family exploring Delhi's history over four days.",
+      "tags": ["delhi", "family", "dietary"],
+      "request": {
+        "destination": "Delhi", "origin_city": "Lucknow", "num_days": 4, "start_in_days": 45,
+        "budget": 60000, "currency": "INR", "num_travelers": 4,
+        "preferences": {"travel_style": "family", "pace": "moderate", "interests": ["history", "food"],
+                        "dietary": ["vegetarian"], "transport": ["train"], "accommodation": "mid_range"}
+      },
+      "expected_behavior": "Dates on every day; history and food covered; dietary handled honestly; no attraction repeated."
+    },
+    {
+      "id": "delhi_business_one_day",
+      "description": "Edge case: single-day business trip.",
+      "tags": ["delhi", "business", "edge_case"],
+      "request": {
+        "destination": "Delhi", "num_days": 1,
+        "budget": 15000, "currency": "INR", "num_travelers": 1,
+        "preferences": {"travel_style": "business", "pace": "packed", "interests": ["food"],
+                        "accommodation": "any"}
+      },
+      "expected_behavior": "Exactly 1 day; no overnight accommodation cost; food covered."
+    },
+    {
+      "id": "bengaluru_friends_nightlife",
+      "description": "Group of four friends, nightlife and food, budget stays.",
+      "tags": ["bengaluru", "friends", "budget"],
+      "request": {
+        "destination": "Bengaluru", "origin_city": "Mysuru", "num_days": 2,
+        "budget": 20000, "currency": "INR", "num_travelers": 4,
+        "preferences": {"travel_style": "friends", "pace": "moderate", "interests": ["nightlife", "food"],
+                        "transport": ["bus"], "accommodation": "budget"}
+      },
+      "expected_behavior": "Evening nightlife activities from verified venues; 2 rooms for 4 people; budget arithmetic exact."
+    },
+    {
+      "id": "bengaluru_solo_adventure",
+      "description": "Solo adventure and nature trip on a packed pace.",
+      "tags": ["bengaluru", "solo", "adventure"],
+      "request": {
+        "destination": "Bengaluru", "num_days": 3,
+        "budget": 15000, "currency": "INR", "num_travelers": 1,
+        "preferences": {"travel_style": "solo", "pace": "packed", "interests": ["adventure", "nature"],
+                        "accommodation": "budget"}
+      },
+      "expected_behavior": "Nature/adventure places only if research found them; otherwise gaps stated in uncertainty notes rather than invented."
+    },
+    {
+      "id": "goa_family_jain_homestay",
+      "description": "Family with Jain dietary needs staying in a homestay.",
+      "tags": ["goa", "family", "dietary", "homestay"],
+      "request": {
+        "destination": "Goa", "origin_city": "Mumbai", "num_days": 5,
+        "budget": 60000, "currency": "INR", "num_travelers": 4,
+        "preferences": {"travel_style": "family", "pace": "relaxed", "interests": ["beaches", "nature"],
+                        "dietary": ["jain"], "transport": ["train"], "accommodation": "homestay"}
+      },
+      "expected_behavior": "Jain suitability flagged unless a source confirms it; relaxed pace (max 3 per day); 5 complete days."
+    }
+  ]
+}

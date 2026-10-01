@@ -1,0 +1,7 @@
+# Everything for the app lives in one namespace: easy to list, secure (NetworkPolicy) and delete.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: travel-planner
+  labels:
+    app.kubernetes.io/part-of: ai-travel-planner

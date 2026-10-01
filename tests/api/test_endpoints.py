@@ -36,7 +36,7 @@ def test_readiness_reports_missing_key_names_not_values(client, make_settings):
     )
     resp = client.get("/api/v1/health/ready")
     assert resp.status_code == 503
-    assert resp.json()["checks"]["config"] == "missing: LLM_API_KEY"
+    assert resp.json()["checks"]["config"] == "missing: GEMINI_API_KEY"
     assert "tvly-secret" not in resp.text
 
 
@@ -71,11 +71,17 @@ def test_plan_rejects_malformed_json(client):
     assert resp.json()["error"]["code"] == "INVALID_REQUEST"
 
 
-def test_plan_valid_request_reaches_planner_stub(client, goa_payload):
-    # Stage 1 honesty check: validation passes, planner is not built yet.
-    resp = client.post("/api/v1/plan", json=goa_payload)
-    assert resp.status_code == 501
-    assert resp.json()["error"]["code"] == "PLANNER_NOT_IMPLEMENTED"
+def test_research_returns_labelled_demo_research(client, goa_payload):
+    # Stage 2 behaviour, now served at /research (/plan returns the itinerary since Stage 3).
+    resp = client.post("/api/v1/research", json=goa_payload)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["stage"] == "research"
+    assert body["data_mode"] == "demo"
+    assert body["metadata"]["is_demo"] is True
+    assert "DEMO DATA" in body["notice"]
+    assert body["request_id"] == resp.headers["X-Request-ID"]
+    assert body["research"]["attractions"], "demo pipeline should yield attractions"
 
 
 def test_unexpected_errors_do_not_leak_details(client):

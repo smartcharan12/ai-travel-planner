@@ -1,0 +1,56 @@
+# Streamlit UI. Separate Deployment from the API: different scaling, resources and exposure.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  labels: {app: frontend}
+spec:
+  # Streamlit keeps each user's session in the memory of one pod (over a websocket).
+  # One replica avoids needing sticky sessions; see docs/23 before scaling it.
+  replicas: 1
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels: {app: frontend}
+  template:
+    metadata:
+      labels: {app: frontend}
+    spec:
+      serviceAccountName: frontend
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: frontend
+          image: ai-travel-planner-frontend:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - {name: http, containerPort: 8501}
+          envFrom:
+            - configMapRef: {name: frontend-config}   # API_BASE_URL; the UI holds no secrets
+          resources:
+            # Measured locally: ~60 MiB idle; each open session adds memory.
+            requests: {cpu: 100m, memory: 192Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          livenessProbe:
+            httpGet: {path: /_stcore/health, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: {path: /_stcore/health, port: http}
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+            - {name: home, mountPath: /home/app}      # Streamlit writes small files under $HOME
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}
+        - name: home
+          emptyDir: {sizeLimit: 64Mi}

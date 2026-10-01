@@ -1,0 +1,11 @@
+# ClusterIP as well: the Ingress (GKE overlay) or `kubectl port-forward` (local) reaches it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  labels: {app: frontend}
+spec:
+  type: ClusterIP
+  selector: {app: frontend}
+  ports:
+    - {name: http, port: 8501, targetPort: http}

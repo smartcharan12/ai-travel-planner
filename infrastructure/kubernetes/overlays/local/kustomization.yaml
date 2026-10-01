@@ -1,0 +1,21 @@
+# Local cluster (kind / minikube / Docker Desktop). Images are built locally and loaded into the
+# cluster (`kind load docker-image`), DEMO_MODE is on so it runs without keys, and the UI is reached
+# with `kubectl port-forward` (no Ingress controller needed). Steps: docs/23_kubernetes.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+patches:
+  - target: {kind: ConfigMap, name: api-config}
+    patch: |-
+      - op: replace
+        path: /data/DEMO_MODE
+        value: "true"
+      - op: replace
+        path: /data/APP_ENV
+        value: "dev"
+images:
+  - name: ai-travel-planner-api
+    newTag: local
+  - name: ai-travel-planner-frontend
+    newTag: local

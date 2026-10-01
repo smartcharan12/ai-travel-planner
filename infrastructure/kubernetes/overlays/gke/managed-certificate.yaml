@@ -1,0 +1,9 @@
+# Google-managed TLS certificate. Replace the domain, point its DNS A record at the static IP,
+# add this file to kustomization.yaml and uncomment the annotation in ingress.yaml.
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: travel-planner-cert
+spec:
+  domains:
+    - travel.example.com

@@ -2,14 +2,50 @@
 
 > **Status legend** used throughout this repo:
 > ✅ built and tested · 🚧 designed, built in a later stage · 📝 instructions only (not run by the author)
+> **Final status (Stage 5):** all stages built. Application, evaluation logic and observability are VERIFIED by
+> 300 offline tests. Docker, Kubernetes, GCP and CI/CD are written and statically validated, NOT RUN.
+> Real Gemini/Tavily calls NOT RUN (no keys). See FINAL_PROJECT_REPORT.md.
 >
-> Build stages: **Stage 1** (this) foundations · **Stage 2** AI core · **Stage 3** UI, tests, evaluation ·
-> **Stage 4** ops (logging, ELK, Docker, Kubernetes, GCP, CI/CD) · **Stage 5** docs and final audit.
+> Build stages: **Stage 1** ✅ foundations · **Stage 2** ✅ research layer (search, Gemini extraction, grounding) ·
+> **Stage 3** ✅ itinerary planning, budget, Streamlit UI · **Stage 4** ✅ evaluation, logging, ELK, Docker ·
+> **Stage 5** ✅ Kubernetes, GCP, CI/CD, final docs and audit. See §14.
 
 This document is the map of the whole system. Every later file has a place on it. If you only read one design
 document, read this one.
 
 ---
+
+## 0. Final architecture (Stage 5)
+
+### Cloud target (GCP), DOCUMENTED ONLY
+
+```mermaid
+flowchart TB
+    GH[GitHub] --> GA[GitHub Actions<br/>ci.yml: lint, tests, demo eval, pip-audit,<br/>kubeconform, build, smoke test, Trivy]
+    GA -- deploy.yml via Workload Identity Federation --> AR[(Artifact Registry)]
+    AR --> GKE
+    subgraph GKE[GKE Autopilot, namespace travel-planner]
+      ING[Ingress → Cloud Load Balancer] --> UI[Streamlit<br/>Deployment ×1]
+      UI -- ClusterIP --> API[FastAPI<br/>Deployment ×2..6, HPA]
+      API --> LG[LangGraph: research → plan → validate ⇄ repair → itinerary + budget]
+    end
+    LG -- HTTPS --> TAV[(Tavily)] & GEM[(Gemini)]
+    SM[(Secret Manager)] -. CSI files, Workload Identity .-> API
+    API & UI -- JSON stdout --> CL[Cloud Logging] --> CMON[Cloud Monitoring<br/>log-based metrics, alerts]
+    API -. /api/v1/metrics .-> CMON
+```
+
+### Local (docker-compose), configuration tested, NOT RUN
+
+```mermaid
+flowchart LR
+    B[Browser] --> FE[frontend :8501] --> APIc[api :8000]
+    APIc -- app.jsonl volume --> LS[Logstash] --> ES[(Elasticsearch)] --> KB[Kibana :5601]
+    APIc --> TAVc[(Tavily)] & GEMc[(Gemini)]
+```
+
+Local uses ELK; GCP uses Cloud Logging. The app is identical in both: it writes JSON to stdout, plus a file only
+when `LOG_FILE` is set (compose).
 
 ## 1. The problem
 
@@ -157,28 +193,35 @@ document both, because both appear in job descriptions and the concepts transfer
 ("is this plan faithful to the sources and useful?"). DeepEval provides LLM-as-judge metrics (faithfulness,
 relevancy, custom G-Eval criteria) inside a pytest-like workflow, so evaluation runs like a test suite.
 
-## 5. The LangGraph workflow 🚧 (Stage 2)
+## 5. The LangGraph workflow ✅ (research: Stage 2 · itinerary: Stage 3)
+
+Node names below are the real ones from `app/graph/research_graph.py` and `planning_graph.py`; the research part is explained in detail
+in `docs/09_research_pipeline.md`, the itinerary part in `docs/13_itinerary_planning.md` and
+`docs/14_validation_and_repair.md`.
 
 ```mermaid
 flowchart TD
-    START([START]) --> VI[validate_input<br/>normalise request, build search queries]
-    VI --> S1[search_destination]
-    VI --> S2[search_attractions]
-    VI --> S3[search_restaurants]
-    VI --> S4[search_hotels]
-    VI --> S5[search_transport]
-    S1 & S2 & S3 & S4 & S5 --> AG[aggregate_research<br/>dedupe URLs, filter irrelevant, number sources S1..Sn]
+    START([START]) --> VI[prepare_queries ✅<br/>5 deterministic queries]
+    VI --> S1[search_destination ✅]
+    VI --> S2[search_attractions ✅]
+    VI --> S3[search_restaurants ✅]
+    VI --> S4[search_hotels ✅]
+    VI --> S5[search_transportation ✅]
+    S1 & S2 & S3 & S4 & S5 --> AG[aggregate_research ✅<br/>dedupe URLs, filter irrelevant, number sources S1..Sn]
     AG -- "no usable results" --> FAIL([END: NO_RESEARCH_RESULTS])
-    AG --> EX[extract_entities<br/>LLM #1, temperature 0]
-    EX --> GR[ground_entities<br/>drop entities whose name is not in cited source]
-    GR --> GEN[generate_itinerary<br/>LLM #2]
-    GEN --> OPT[optimize_itinerary<br/>dedupe, cap per day, order slots]
+    AG --> EX[extract_entities ✅<br/>LLM #1, temperature 0]
+    EX --> GR[ground_entities ✅<br/>drop entities whose name is not in cited source]
+    GR --> CR{check_research ✅<br/>any attractions/restaurants?}
+    CR -- no --> FAIL3([END: NO_RESEARCH_RESULTS])
+    CR --> GEN[generate_itinerary ✅<br/>LLM #2, temperature 0.3]
+    GEN --> OPT[optimize_itinerary ✅<br/>order slots, dedupe, caps]
     OPT --> VAL{validate_itinerary}
     VAL -- "errors and attempts < MAX_REPAIR_ATTEMPTS" --> REP[repair_itinerary<br/>LLM, given the error list]
     REP --> OPT
     VAL -- "errors and attempts exhausted" --> FAIL2([END: ITINERARY_INVALID])
-    VAL -- "ok (warnings allowed)" --> BUD[calculate_budget<br/>deterministic]
-    BUD --> QC[quality_check<br/>deterministic]
+    VAL -- "ok (warnings allowed)" --> ASM[assemble_itinerary ✅<br/>dates, areas, verified prices]
+    ASM --> BUD[calculate_budget ✅<br/>deterministic]
+    BUD --> QC[quality_check ✅<br/>deterministic]
     QC --> END([END: TravelResponse])
 ```
 
@@ -187,9 +230,11 @@ flowchart TD
 | Field | Written by | Read by |
 |---|---|---|
 | `request: TravelRequest` | API | every node |
-| `hits: list[SearchHit]` | search nodes (merged with a reducer, because they run in parallel) | aggregate |
+| `category_results` | search nodes (merged with a reducer, because they run in parallel) | aggregate |
+| `hits: list[SearchHit]` | aggregate | extract, ground |
 | `research: ResearchResult` | aggregate, extract, ground | generate, validate, budget, quality |
-| `itinerary: Itinerary` | generate, repair, optimize | validate, budget, quality |
+| `draft: ItineraryDraft` | generate, repair, optimize | validate, repair, assemble |
+| `itinerary: Itinerary` | assemble | budget, quality, response |
 | `issues: list[ValidationIssue]` | validate | router, repair, response |
 | `repair_attempts: int` | repair | router |
 | `budget: BudgetBreakdown` | budget | response |
@@ -213,7 +258,7 @@ We chose a **workflow with one agentic element** (the self-correcting validate �
 A free-roaming agent would make sense for open-ended follow-ups ("find a cheaper hotel near day 2's
 activities"). That is listed as a future improvement, not built.
 
-## 7. Search architecture 🚧 (Stage 2)
+## 7. Search architecture ✅ (Stage 2, see `docs/07_search_layer.md`)
 
 ```mermaid
 classDiagram
@@ -224,10 +269,10 @@ classDiagram
     }
     SearchProvider <|-- TavilySearchProvider
     SearchProvider <|-- SerperSearchProvider
-    SearchProvider <|-- MockSearchProvider
+    SearchProvider <|-- DemoSearchProvider
     class TavilySearchProvider { POST api.tavily.com/search }
     class SerperSearchProvider { POST google.serper.dev/search }
-    class MockSearchProvider { offline fixtures, demo/tests only }
+    class DemoSearchProvider { invented, labelled offline data; DEMO_MODE only }
     ResearchNodes --> SearchProvider : uses (chosen by SEARCH_PROVIDER)
 ```
 
@@ -239,12 +284,12 @@ The rest of the system never knows which provider ran.
 and seasonal notes need search. General phrasing, grouping and travel-style advice ("carry sunscreen") may come
 from the LLM and are labelled as tips, not facts.
 
-## 8. Observability architecture 🚧 (Stage 4)
+## 8. Observability architecture ✅ code · 📝 ELK not run (Stage 4: see docs/18, docs/20)
 
 ```mermaid
 flowchart LR
-    APP[FastAPI app<br/>JSON log lines] --> OUT[stdout]
-    APP --> FILE[/logs/app.jsonl<br/>shared Docker volume/]
+    APP[FastAPI app<br/>JSON events: request_completed, search_call,<br/>llm_call, itinerary_validated, plan_completed…] --> OUT[stdout]
+    APP --> FILE[/var/log/app/app.jsonl<br/>shared Docker volume/]
     FILE --> LS[Logstash<br/>parse, enrich, drop secrets]
     LS --> ES[(Elasticsearch<br/>index: travel-planner-logs-*)]
     ES --> KB[Kibana<br/>dashboards & search]
@@ -255,9 +300,11 @@ flowchart LR
 - **LLM observability**: is the AI part behaving and affordable? LLM latency per call, calls per request,
   input/output tokens, estimated cost, repair-loop frequency, grounding ratio, search failures by provider.
 
-Both come from the same structured log lines. What differs is which fields you chart.
+Both come from the same structured log lines. What differs is which fields you chart. Every event of a request
+carries the same `request_id` (log correlation; no distributed tracing system yet). Metrics: `/api/v1/metrics`.
+Offline LLM evaluation (DeepEval + deterministic metrics) lives in `evaluation/` (docs/19).
 
-## 9. Deployment architecture 🚧 / 📝 (Stage 4)
+## 9. Deployment architecture (Docker, Kubernetes ✅ written and statically validated · 📝 not run; GCP 📝 documented, see docs/21–24)
 
 ```mermaid
 flowchart LR
@@ -269,7 +316,7 @@ flowchart LR
       ING[Load balancer / Ingress] --> FESVC[frontend Service] --> FEPOD[frontend pods]
       FEPOD --> APISVC[api Service] --> APIPOD[api pods ×2<br/>liveness + readiness probes]
       CM[ConfigMap<br/>non-secret settings] -.-> APIPOD
-      SEC[Secret<br/>API keys from Secret Manager] -.-> APIPOD
+      SEC[Secret Manager files via CSI<br/>Workload Identity, no key files] -.-> APIPOD
     end
     APIPOD --> GEM[(Gemini API)]
     APIPOD --> TAV[(Tavily API)]
@@ -286,14 +333,14 @@ The service is **stateless**: no database, and each request is independent. That
 scaling simply "add replicas". Long-running work (30–60 s per plan, dominated by LLM latency) is the main
 scaling concern, which is why timeouts and bounded retries are configuration, not hard-coded.
 
-## 10. CI/CD 🚧 (Stage 4)
+## 10. CI/CD ✅ written, actionlint clean · NOT RUN on GitHub (docs/26)
 
 ```mermaid
 flowchart LR
-    P[git push / PR] --> I[Install deps] --> L[ruff lint + format check] --> T[pytest<br/>no real API keys needed]
-    T --> D[docker build]
-    D -- "main branch + secrets configured" --> PU[push to Artifact Registry]
-    PU -- "manual approval" --> DEP[kubectl apply to GKE]
+    P[PR / push] --> T[ruff + pytest + demo eval] & DA[pip-audit] & M[kustomize + kubeconform]
+    T -- main only --> I[hadolint, build images, smoke test, Trivy]
+    I -. CI success on main .-> D[deploy.yml: WIF → Artifact Registry → kubectl apply -k → rollout / undo]
+    MAN[manual] --> L[eval-live.yml: live tests + DeepEval]
 ```
 
 ## 11. Technology decisions
@@ -304,18 +351,18 @@ flowchart LR
 | FastAPI | ✅ | Typed request/response from Pydantic, automatic `/docs`, async-ready | Hand-written validation and docs |
 | Pydantic v2 | ✅ | One schema serves API validation, LLM structured output and docs | Three diverging definitions of "an itinerary" |
 | pydantic-settings | ✅ | Typed env-var config, secrets masked | Scattered `os.getenv`, string-typed config bugs |
-| Gemini (via LangChain) | 🚧 | Good structured output, free tier, natural fit with GCP | — (provider is swappable) |
-| LangChain (core pieces only) | 🚧 | Provider-neutral chat model, prompt templates, structured output | Re-implementing parsing/retries per provider |
-| LangGraph | 🚧 | Parallel branches, conditional repair loop, typed shared state | Hand-rolled orchestration |
-| Tavily (default) / Serper | 🚧 | Tavily returns page extracts made for LLMs; Serper returns Google results cheaply | Stale LLM memory |
-| Streamlit | 🚧 | Pure-Python UI; talks to the API over HTTP like any client | A JS toolchain to learn |
+| Gemini (via LangChain) | ✅ (offline-verified; live call NOT TESTED, key required) | Good structured output, free tier, natural fit with GCP | — (provider is swappable) |
+| LangChain (core pieces only) | ✅ | Provider-neutral chat model, prompt templates, structured output | Re-implementing parsing/retries per provider |
+| LangGraph | ✅ research graph | Parallel branches, conditional repair loop, typed shared state | Hand-rolled orchestration |
+| Tavily (default) / Serper | ✅ (HTTP mocked in tests; live call NOT TESTED, key required) | Tavily returns page extracts made for LLMs; Serper returns Google results cheaply | Stale LLM memory |
+| Streamlit | ✅ | Pure-Python UI; talks to the API over HTTP like any client | A JS toolchain to learn |
 | pytest + ruff | ✅ | Standard testing and linting | Regressions, style drift |
-| DeepEval | 🚧 | LLM-as-judge metrics in a test-like workflow | No measure of answer quality |
-| Docker / Compose | 🚧 | Reproducible runtime; local ELK in one command | "Works on my machine" |
-| Kubernetes | 🚧 | Replicas, self-healing, probes, rolling updates | Manual restarts and scaling |
+| DeepEval | ✅ (demo run; live/judge NOT RUN: keys) | LLM-as-judge metrics in a test-like workflow | No measure of answer quality |
+| Docker / Compose | ✅ written, statically tested; NOT RUN (Docker unavailable) | Reproducible runtime; local ELK in one command | "Works on my machine" |
+| Kubernetes | ✅ manifests (kubeconform 31/31); cluster NOT RUN | Replicas, self-healing, probes, rolling updates | Manual restarts and scaling |
 | GCP (GKE, Artifact Registry, Secret Manager, Cloud Logging) | 📝 | Managed versions of the above | Running our own infrastructure |
-| ELK | 🚧 | Central, searchable logs and dashboards | Grepping logs pod by pod |
-| GitHub Actions | 🚧 | Tests on every push, build images | Broken main branch |
+| ELK | ✅ written, statically tested; NOT RUN (Docker unavailable) | Central, searchable logs and dashboards | Grepping logs pod by pod |
+| GitHub Actions | ✅ written (actionlint clean); NOT RUN | Tests on every push, build images | Broken main branch |
 
 **Deliberately *not* used, and why:**
 
@@ -344,22 +391,26 @@ ai-travel-planner/
 │   ├── core/exceptions.py    ✅ domain errors → HTTP status codes
 │   ├── api/                  ✅ routes, middleware (request id, metrics), error handlers
 │   ├── schemas/              ✅ all Pydantic contracts (request, research, itinerary, response)
-│   ├── observability/        ✅ metrics registry · 🚧 structured logging
-│   ├── llm/                  🚧 LLM factory, usage/cost tracking
-│   ├── prompts/              🚧 research, planner, repair prompts
-│   ├── tools/search/         🚧 SearchProvider base + Tavily, Serper, Mock
-│   ├── graph/                🚧 LangGraph state, nodes, workflow
-│   └── services/             🚧 budget engine, optimizer, validator, quality checks
-├── frontend/                 🚧 Streamlit app
-├── tests/                    ✅ unit/ api/ · 🚧 integration/
-├── evaluation/               🚧 DeepEval datasets, metrics, runner
+│   ├── observability/        ✅ JSON logging, request context, metrics registry
+│   ├── llm/                  ✅ factory, StructuredLLM (parse/validate/retry/errors/usage), demo model
+│   ├── prompts/              ✅ research, planner and repair prompts
+│   ├── tools/search/         ✅ SearchProvider base + Tavily, Serper, Demo, factory
+│   ├── research/             ✅ queries, normalizer, grounding, text helpers
+│   ├── graph/                ✅ state, research graph, planning graph
+│   ├── planning/             ✅ optimizer, validator, assembler, pricing, budget engine, quality
+│   ├── services/             ✅ TravelPlanner (/plan), ResearchPlanner (/research)
+│   └── demo/                 ✅ invented, labelled offline data (DEMO_MODE)
+├── scripts/run_research.py   ✅ run the research workflow from the CLI
+├── frontend/                 ✅ Streamlit app, API client, presenters
+├── tests/                    ✅ unit/ api/ integration/ (offline) · live/ (optional, real APIs)
+├── evaluation/               ✅ DeepEval dataset, metrics, judge, runner, suites
+├── Dockerfile                ✅ API image · frontend/Dockerfile ✅ UI image · .dockerignore ✅
+├── docker-compose.yml        ✅ api + frontend; --profile elk adds ES, Logstash, Kibana
 ├── infrastructure/
-│   ├── docker/               🚧
-│   ├── kubernetes/           🚧 manifests
-│   └── gcp/                  📝 setup scripts and guide
-├── monitoring/elk/           🚧 Logstash pipeline, Kibana setup
+│   └── kubernetes/           ✅ base + overlays/local + overlays/gke (kustomize)
+├── monitoring/elk/           ✅ Logstash pipeline, ES index template, Kibana setup
 ├── docs/                     learning docs (numbered) + REQUEST_FLOW, FILE_GUIDE, etc.
-└── .github/workflows/ci.yml  🚧
+└── .github/workflows/        ✅ ci.yml, deploy.yml, eval-live.yml
 ```
 
 **Changes from the originally suggested structure, and why:**
@@ -373,6 +424,13 @@ ai-travel-planner/
 | `budget_prompt.py`, `validation_prompt.py` | `repair_prompt.py` | Budget and validation are deterministic code (on purpose), so they need no prompt. Repair is the LLM step that reacts to validation. |
 | `docs/12_database.md` | `docs/12_data_models.md` | No database (see §11); the data models deserve that chapter instead. |
 | `app/core/` | added | Shared exceptions used by every layer, kept free of FastAPI imports. |
+| — | `app/research/` (Stage 2) | Query building, normalization and grounding are plain-Python research logic, testable without LangGraph or an LLM. |
+| — | `app/demo/` (Stage 2) | Keeps invented demo data in one obvious place, far from real code paths. |
+| `app/services/` for budget/optimizer | `app/planning/` (Stage 3) | Pure deterministic planning rules, separate from the service classes that orchestrate the graph. |
+| `infrastructure/docker/` | root `Dockerfile` + `frontend/Dockerfile` (Stage 4) | Docker's default location and build context is the repo root; compose builds both from there. |
+| `infrastructure/gcp/` | `docs/24_gcp.md` + `overlays/gke/` | GCP setup is a sequence of one-time `gcloud` commands, better as a documented guide than unexecuted scripts; GKE-specific YAML lives in the overlay. |
+| — | `POST /api/v1/research` (Stage 3) | Keeps the Stage 2 research-only response available for inspecting research quality. |
+| `docs/11_api.md` | `docs/05_api.md` | Number 11 is now the request-to-research walkthrough; the API is Phase 5. |
 
 ## 13. End-to-end data flow (the running example)
 
@@ -397,14 +455,18 @@ User: **Goa, 4 days, ₹25,000 total, 2 travellers, couple, interests beaches/fo
 12. **Logstash** ships the line to **Elasticsearch**; **Kibana** charts it. **DeepEval** later replays
     requests like this one offline and scores the output.
 
-`docs/REQUEST_FLOW.md` (Stage 2) shows the actual JSON at each of these steps.
+`docs/11_request_to_research_flow.md` shows the JSON at each research step; `docs/REQUEST_FLOW.md` continues
+through planning, repair, budget and response.
 
-## 14. Roadmap: 22 phases in 5 stages
+## 14. Roadmap
 
-| Stage | Phases | Delivers | You can then… |
-|---|---|---|---|
-| **1** ✅ | 1 Architecture · 2 Structure · 3 Config · 4 Data models · 5 FastAPI | Validated API skeleton, 54 tests | Run the API, read `/docs`, send requests |
-| **2** | 6 LLM · 7 Search · 8 LangChain · 9 LangGraph · 10 Generation · 11 Budget (+ optimizer) | Working planner (real keys or offline demo mode) | Get a real Goa itinerary via the API |
-| **3** | 12 Frontend · 13 Testing · 14 DeepEval | Streamlit UI, integration tests, evaluation suite | Use the app in a browser; measure quality |
-| **4** | 15 Logging · 16 ELK · 17 Docker · 18 Kubernetes · 19 GCP · 20 CI/CD | Containerised, observable, deployable system | `docker compose up`, Kibana dashboards, k8s manifests |
-| **5** | 21 Documentation · 22 Final audit | README, beginner guide, file guide, walkthrough, interview + resume docs, audit | Explain every part in an interview |
+The original plan had itinerary generation in Stage 2. In Stage 2 we chose to finish the research layer
+first (search → extraction → verification), so itinerary generation moved to Stage 3 and the later stages shift.
+
+| Stage | Contents | Status |
+|---|---|---|
+| **1** | Architecture, structure, config, data models, FastAPI | ✅ |
+| **2** | Search abstraction + Tavily/Serper, deterministic queries, normalization, Gemini integration, research prompt, extraction, grounding/traceability, demo mode, `/plan` returns research | ✅ (live APIs NOT TESTED: keys required) |
+| **3** | Itinerary generation (planner prompt), optimizer, validation + repair loop, budget engine, `TravelResponse`, Streamlit frontend | ✅ (live APIs NOT TESTED: keys required) |
+| **4** | Grounding fix (no LLM titles, named-place check), DeepEval evaluation, structured JSON logging, LLM/search/repair observability, ELK, Docker / docker-compose | ✅ (live eval, judge, Docker, ELK NOT RUN: see README) |
+| **5** | Kubernetes (kustomize), GCP guide, CI/CD, hardening (CORS, limits, prod guard, file secrets), final docs and audit | ✅ (Docker/K8s/GCP/CI NOT RUN; see FINAL_PROJECT_REPORT.md) |

@@ -48,6 +48,13 @@ class SearchProviderError(TravelPlannerError):
     public_message = "The travel search service failed. Please try again shortly."
 
 
+class SearchAuthError(SearchProviderError):
+    """The search API rejected our key (401/403). An operator problem, not the user's."""
+
+    code = "SEARCH_PROVIDER_AUTH_ERROR"
+    public_message = "The travel search service rejected the server's credentials. Contact the operator."
+
+
 class SearchTimeoutError(SearchProviderError):
     code = "SEARCH_TIMEOUT"
     http_status = 504
@@ -70,6 +77,13 @@ class LLMError(TravelPlannerError):
     code = "LLM_ERROR"
     http_status = 502
     public_message = "The AI model failed to respond. Please try again."
+
+
+class LLMAuthError(LLMError):
+    """The LLM API rejected our key or project permissions."""
+
+    code = "LLM_AUTH_ERROR"
+    public_message = "The AI model rejected the server's credentials. Contact the operator."
 
 
 class LLMTimeoutError(LLMError):
@@ -98,14 +112,3 @@ class RateLimitError(TravelPlannerError):
     code = "RATE_LIMITED"
     http_status = 429
     public_message = "Too many requests. Please wait a moment and try again."
-
-
-# ---------- Build-stage placeholder ----------
-class PlannerNotReadyError(TravelPlannerError):
-    """Raised by /plan until the planning workflow is implemented (Stage 2)."""
-
-    code = "PLANNER_NOT_IMPLEMENTED"
-    http_status = 501
-    public_message = (
-        "Request accepted by validation, but the planning workflow is not built yet (arrives in Stage 2)."
-    )

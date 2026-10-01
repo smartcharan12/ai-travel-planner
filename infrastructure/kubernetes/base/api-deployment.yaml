@@ -1,0 +1,71 @@
+# FastAPI planner. Explained line by line in docs/23_kubernetes.md.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  labels: {app: api}
+spec:
+  replicas: 2                          # survive one pod/node failure; HPA scales 2..6
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}   # never drop below 2 ready pods during a deploy
+  selector:
+    matchLabels: {app: api}
+  template:
+    metadata:
+      labels: {app: api}
+    spec:
+      serviceAccountName: api
+      automountServiceAccountToken: false
+      # Plans take tens of seconds: preStop (5 s) + uvicorn graceful shutdown (60 s) < 75 s.
+      terminationGracePeriodSeconds: 75
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      topologySpreadConstraints:       # prefer replicas on different nodes
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector: {matchLabels: {app: api}}
+      containers:
+        - name: api
+          image: ai-travel-planner-api:local      # replaced per environment by kustomize `images:`
+          imagePullPolicy: IfNotPresent
+          ports:
+            - {name: http, containerPort: 8000}
+          envFrom:
+            - configMapRef: {name: api-config}
+            - secretRef: {name: api-secrets, optional: true}   # local clusters; GKE uses Secret Manager files
+          resources:
+            # Measured locally: ~116 MiB RSS idle (demo mode). Headroom for real Gemini/HTTP clients.
+            requests: {cpu: 200m, memory: 256Mi}
+            limits: {cpu: "1", memory: 512Mi}
+          startupProbe:                # give the process up to 60 s to start before liveness applies
+            httpGet: {path: /api/v1/health, port: http}
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:               # "is the process alive?" -> restart if not. No external calls.
+            httpGet: {path: /api/v1/health, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:              # "should it receive traffic?" -> removed from Service if not
+            httpGet: {path: /api/v1/health/ready, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 2
+          lifecycle:
+            preStop:                   # let the Service stop routing here before shutdown starts
+              exec: {command: ["sleep", "5"]}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}   # the only writable path (Python temp files)
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}

@@ -1,0 +1,27 @@
+# NON-SECRET configuration only. Every key here is a field of app/config.py:Settings
+# (a test checks this). Secrets (API keys) are NEVER put in a ConfigMap.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-config
+data:
+  APP_ENV: "dev"
+  LOG_FORMAT: "json"            # stdout JSON -> Cloud Logging / kubectl logs
+  LOG_LEVEL: "INFO"
+  LLM_PROVIDER: "gemini"
+  LLM_MODEL: "gemini-2.5-flash"
+  SEARCH_PROVIDER: "tavily"
+  DEMO_MODE: "false"
+  MAX_REPAIR_ATTEMPTS: "2"
+  RATE_LIMIT_PER_MINUTE: "20"
+  MAX_CONCURRENT_PLANS: "8"
+  CORS_ALLOW_ORIGINS: ""        # UI calls the API server-side; no browser CORS needed
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-config
+data:
+  # In-cluster DNS name of the API Service: <service>.<namespace>.svc.cluster.local.
+  # Not an IP and not a cloud-specific address, so the same value works on kind and GKE.
+  API_BASE_URL: "http://api.travel-planner.svc.cluster.local:8000"

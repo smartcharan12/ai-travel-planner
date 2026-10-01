@@ -1,0 +1,17 @@
+# Public entry point: an external Google Cloud HTTP(S) load balancer in front of the UI ONLY.
+# The API stays internal (ClusterIP) because it has no authentication of its own.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: frontend
+  annotations:
+    kubernetes.io/ingress.class: "gce"
+    # Reserve a static IP first: gcloud compute addresses create travel-planner-ip --global
+    kubernetes.io/ingress.global-static-ip-name: "travel-planner-ip"
+    # HTTPS once a domain points at the IP (managed-certificate.yaml):
+    # networking.gke.io/managed-certificates: "travel-planner-cert"
+spec:
+  defaultBackend:
+    service:
+      name: frontend
+      port: {number: 8501}

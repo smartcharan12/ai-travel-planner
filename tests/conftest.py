@@ -6,6 +6,10 @@ behave identically on a laptop with keys and in CI without them.
 
 from __future__ import annotations
 
+import os
+
+os.environ.setdefault("DEEPEVAL_TELEMETRY_OPT_OUT", "YES")  # if DeepEval is imported by a test
+
 from collections.abc import Callable, Iterator
 from datetime import date, timedelta
 from typing import Any

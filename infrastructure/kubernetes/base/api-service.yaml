@@ -1,0 +1,12 @@
+# ClusterIP: reachable only INSIDE the cluster (by the UI). The API has no authentication,
+# so it is deliberately not exposed to the internet.
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  labels: {app: api}
+spec:
+  type: ClusterIP
+  selector: {app: api}
+  ports:
+    - {name: http, port: 8000, targetPort: http}

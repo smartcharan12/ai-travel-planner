@@ -1,0 +1,3 @@
+# Frontend dependencies (separate so the API image doesn't need Streamlit, and vice versa).
+streamlit==1.64.0
+httpx==0.28.1

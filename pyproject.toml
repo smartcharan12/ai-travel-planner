@@ -22,7 +22,9 @@ ignore = ["B008"]  # FastAPI's Depends() in default arguments is idiomatic.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra"
+# DeepEval registers a pytest plugin; keep it out of the fast offline suite (evaluation/ has its own pytest.ini).
+addopts = "-ra -p no:deepeval"
 markers = [
-    "integration: needs real external services (API keys); skipped in CI by default",
+    "integration: several of our components together; external services faked (runs offline)",
+    "live: calls real Tavily/Gemini APIs; skipped unless RUN_LIVE_TESTS=1 and keys are set",
 ]

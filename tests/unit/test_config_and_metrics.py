@@ -11,7 +11,7 @@ from app.observability.metrics import MetricsRegistry
 def test_blank_api_key_counts_as_missing(make_settings):
     settings = make_settings(llm_api_key="", tavily_api_key="   ")
     assert settings.llm_api_key is None
-    assert settings.missing_secrets() == ["LLM_API_KEY", "TAVILY_API_KEY"]
+    assert settings.missing_secrets() == ["GEMINI_API_KEY", "TAVILY_API_KEY"]
 
 
 def test_keys_are_hidden_when_printed(make_settings):
@@ -53,3 +53,15 @@ def test_metrics_counters_and_timings():
     snap = registry.snapshot()
     assert snap["counters"] == {"calls{a=1,provider=tavily}": 2}
     assert snap["timings_ms"]["latency"] == {"count": 2, "avg": 200.0, "max": 300.0}
+
+
+def test_env_example_parses_as_a_real_env_file():
+    # Regression: `cp .env.example .env` must give a working (keyless) configuration.
+    from pathlib import Path
+
+    from app.config import Settings
+
+    example = Path(__file__).resolve().parents[2] / ".env.example"
+    settings = Settings(_env_file=example)
+    assert settings.llm_api_key is None and settings.log_file is None
+    assert settings.llm_input_cost_per_million_usd is None

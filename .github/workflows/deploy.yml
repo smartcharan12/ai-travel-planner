@@ -1,0 +1,87 @@
+# Continuous deployment to Google Kubernetes Engine. Explained in docs/26_cicd.md and docs/24_gcp.md.
+# Runs after CI succeeds on main (or manually). It does nothing until the repository variables below
+# are configured, so a fresh fork never tries to deploy.
+#
+# Repository VARIABLES (Settings -> Secrets and variables -> Actions -> Variables; not secret):
+#   GCP_PROJECT_ID, GCP_REGION, GKE_CLUSTER, GCP_WIF_PROVIDER, GCP_DEPLOY_SA
+# Repository SECRETS: none with the recommended Workload Identity Federation setup.
+#   (Simple but NOT recommended alternative: a service-account JSON key in secret GCP_SA_KEY, see docs/26.)
+name: Deploy to GKE
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write          # lets GitHub issue an OIDC token that Google exchanges for short-lived credentials
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  REGION: ${{ vars.GCP_REGION }}
+  CLUSTER: ${{ vars.GKE_CLUSTER }}
+  REPOSITORY: travel-planner
+
+jobs:
+  deploy:
+    if: >-
+      vars.GCP_PROJECT_ID != '' &&
+      (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production   # add required reviewers on this environment for a manual approval gate
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Authenticate to Google Cloud (Workload Identity Federation, no stored key)
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+          # Simple alternative (long-lived key, not recommended):
+          # credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Build and push images to Artifact Registry
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          REGISTRY="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY"
+          gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+          docker build -t "$REGISTRY/api:$SHA" --build-arg "GIT_SHA=$SHA" .
+          docker build -t "$REGISTRY/frontend:$SHA" -f frontend/Dockerfile .
+          docker push "$REGISTRY/api:$SHA"
+          docker push "$REGISTRY/frontend:$SHA"
+
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v3
+        with:
+          cluster_name: ${{ env.CLUSTER }}
+          location: ${{ env.REGION }}
+
+      - name: Fill placeholders and apply manifests
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          cd infrastructure/kubernetes/overlays/gke
+          sed -i "s/REGION/$REGION/g; s/PROJECT_ID/$PROJECT_ID/g; s/REPLACE_WITH_GIT_SHA/$SHA/g" \
+            kustomization.yaml secret-provider-class.yaml
+          kubectl apply -k .
+          kubectl -n travel-planner rollout status deployment/api --timeout=300s
+          kubectl -n travel-planner rollout status deployment/frontend --timeout=300s
+
+      - name: Roll back on failure
+        if: failure()
+        run: |
+          kubectl -n travel-planner rollout undo deployment/api || true
+          kubectl -n travel-planner rollout undo deployment/frontend || true

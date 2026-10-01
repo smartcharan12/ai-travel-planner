@@ -27,12 +27,12 @@ current directory → defaults in the class. Names are case-insensitive: `LLM_MO
 1. `Settings()` (pydantic-settings) collects the values and **converts types**: `"7"` → `7`, `"0.3"` → `0.3`.
 2. **Validates ranges**: `llm_temperature` must be 0–1, `search_max_results` 1–10. A bad value raises at
    startup, not at 2 a.m. in the middle of a request.
-3. `_blank_secret_is_none` turns `LLM_API_KEY=` (the empty line in `.env.example`) into `None` = "not set".
+3. `_blank_secret_is_none` turns `GEMINI_API_KEY=` (the empty line in `.env.example`) into `None` = "not set".
 4. Secrets are `SecretStr`: `print(settings)` shows `llm_api_key=SecretStr('**********')`. Code that really
    needs the key calls `.get_secret_value()`, which is easy to search for in review.
 5. `missing_secrets()` lists env var *names* the chosen providers need but don't have. Note the app still
    **starts** without keys. That is deliberate: `/health` can then tell you what is wrong, and the
-   Kubernetes readiness probe keeps the pod out of rotation (Stage 4).
+   Kubernetes readiness probe keeps the pod out of rotation (docs/23).
 6. `get_settings()` is wrapped in `@lru_cache`, so `.env` is parsed once per process.
 
 ## OUTPUT
@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     def missing_secrets(self) -> list[str]:
         missing = []
         if self.llm_provider == "gemini" and self.llm_api_key is None:
-            missing.append("LLM_API_KEY")
+            missing.append("GEMINI_API_KEY")
         ...
         return missing
 ```
@@ -73,8 +73,8 @@ llm_temperature
 
 ## The "demo" providers
 
-`LLM_PROVIDER=fake` and `SEARCH_PROVIDER=mock` select offline stand-ins (built in Stage 2) so tests, CI and a
-first local run need no paid keys. Responses produced that way carry `metadata.is_demo = true` and are
+`DEMO_MODE=true` (or `LLM_PROVIDER=fake` together with `SEARCH_PROVIDER=mock`; mixing one fake and one real
+provider is rejected) selects offline stand-ins so a first local run needs no paid keys. Tests use their own fakes. Responses produced that way carry `metadata.is_demo = true` and are
 **never** presented as real research.
 
 ## Dependency files

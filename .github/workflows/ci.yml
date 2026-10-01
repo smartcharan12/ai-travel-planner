@@ -1,0 +1,152 @@
+# Continuous integration. Explained step by step in docs/26_cicd.md.
+#   pull requests : lint, tests, demo evaluation, dependency audit, manifest validation   (fast, free)
+#   push to main  : all of the above + image builds, container smoke test, image scans
+# No job here needs API keys or cloud credentials; live LLM evaluation is a separate manual workflow.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  DEEPEVAL_TELEMETRY_OPT_OUT: "YES"
+  APP_ENV: test
+
+jobs:
+  test:
+    name: Lint and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements*.txt
+            frontend/requirements.txt
+      - name: Install dependencies
+        run: pip install -r requirements-eval.txt
+      - name: Lint (ruff)
+        run: |
+          ruff check .
+          ruff format --check .
+      - name: Unit, API and frontend tests
+        run: pytest tests/unit tests/api tests/frontend -q
+      - name: Integration tests (whole workflow, external services faked)
+        run: pytest tests/integration -q
+      - name: Demo evaluation (pipeline mechanics only, invented data)
+        run: |
+          pytest -c evaluation/pytest.ini evaluation/test_research.py -q
+          python -m evaluation.runner --mode demo --report-only
+      - name: Upload evaluation report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: demo-evaluation-report
+          path: evaluation/results/*.json
+          if-no-files-found: ignore
+
+  dependency-audit:
+    name: Dependency vulnerabilities (pip-audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Audit runtime dependencies of both images
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt -r frontend/requirements.txt --progress-spinner off
+
+  manifests:
+    name: Kubernetes manifests (kustomize + kubeconform)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz \
+            | tar xz -C /usr/local/bin kubeconform
+      - name: Render and validate both overlays
+        run: |
+          for overlay in local gke; do
+            kubectl kustomize "infrastructure/kubernetes/overlays/$overlay" > "/tmp/$overlay.yaml"
+            kubeconform -strict -summary -kubernetes-version 1.33.0 \
+              -schema-location default \
+              -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+              "/tmp/$overlay.yaml"
+          done
+
+  images:
+    name: Build, smoke-test and scan images
+    if: github.event_name != 'pull_request'
+    needs: [test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Lint Dockerfiles (hadolint)
+        run: |
+          docker run --rm -i hadolint/hadolint:v2.15.1 < Dockerfile
+          docker run --rm -i hadolint/hadolint:v2.15.1 < frontend/Dockerfile
+      - name: Validate docker-compose.yml
+        run: docker compose config --quiet
+      - uses: docker/setup-buildx-action@v4
+      - name: Build API image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          tags: ai-travel-planner-api:ci
+          build-args: GIT_SHA=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Build frontend image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: frontend/Dockerfile
+          load: true
+          tags: ai-travel-planner-frontend:ci
+      - name: Smoke test the API container (demo mode, no keys)
+        run: |
+          docker run -d --name api -p 8000:8000 -e DEMO_MODE=true ai-travel-planner-api:ci
+          for i in $(seq 1 30); do curl -fs localhost:8000/api/v1/health && break; sleep 1; done
+          curl -fs localhost:8000/api/v1/health/ready
+          curl -fs -X POST localhost:8000/api/v1/plan -H 'Content-Type: application/json' \
+            -d '{"destination":"Goa","num_days":2,"budget":20000,"num_travelers":2}' > /tmp/plan.json
+          python3 -c "import json; d=json.load(open('/tmp/plan.json')); assert d['stage']=='itinerary' and d['data_mode']=='demo'"
+          test "$(docker exec api id -u)" = "10001"                     # non-root
+          docker exec api sh -c 'test ! -e /srv/.env'                    # no .env baked in
+          test "$(docker inspect -f '{{.State.Health.Status}}' api)" != "unhealthy"
+          docker logs api | head -n 20
+      - name: Scan API image (Trivy)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ai-travel-planner-api:ci
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Scan frontend image (Trivy)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ai-travel-planner-frontend:ci
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"

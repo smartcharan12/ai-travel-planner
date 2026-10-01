@@ -15,7 +15,7 @@ with a clear message *before* we pay for any search or LLM call.
 **2. Structured output for the LLM.** This is the big one in AI apps. An LLM naturally produces prose.
 Code cannot reliably use prose ("Day 2: maybe visit the fort, around ₹500?"). We hand the LLM the `Itinerary`
 schema and require JSON that matches it. Pydantic then *verifies* the JSON. If the model invents a field,
-leaves out a required one or returns `-50` for a price, validation fails and our repair loop (Stage 2) kicks
+leaves out a required one or returns `-50` for a price, validation fails and our repair loop kicks
 in. **The schema is the contract between probabilistic AI and deterministic code.**
 
 **3. One definition, three uses.** The same class validates API input, shapes LLM output and generates the
@@ -93,8 +93,9 @@ and deduplicated.
 
 ## EXAMPLE — response shape (illustrative, not real output)
 
-> The values below are **made up to show the structure**. Real output arrives in Stage 2 and will be
-> documented from an actual run in `docs/REQUEST_FLOW.md`.
+> The values below are **made up to show the structure**. Real outputs of the code are shown in
+> `docs/REQUEST_FLOW.md` (itinerary) and
+> `docs/11_request_to_research_flow.md`.
 
 ```json
 {

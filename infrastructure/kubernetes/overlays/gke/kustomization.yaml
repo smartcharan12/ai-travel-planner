@@ -1,0 +1,31 @@
+# Google Kubernetes Engine. Placeholders (REGION, PROJECT_ID, image tag) are filled by the deploy
+# workflow (`kustomize edit set image ...`) or by hand. Full guide: docs/24_gcp.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - secret-provider-class.yaml
+  - backend-config.yaml
+  - ingress.yaml
+  # - managed-certificate.yaml   # enable once you own a domain (HTTPS), see docs/24
+patches:
+  - path: api-secret-manager-patch.yaml
+  - target: {kind: ConfigMap, name: api-config}
+    patch: |-
+      - op: replace
+        path: /data/APP_ENV
+        value: "prod"
+  - target: {kind: Service, name: frontend}
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          cloud.google.com/backend-config: '{"default": "frontend"}'
+          cloud.google.com/neg: '{"ingress": true}'
+images:
+  - name: ai-travel-planner-api
+    newName: REGION-docker.pkg.dev/PROJECT_ID/travel-planner/api
+    newTag: REPLACE_WITH_GIT_SHA
+  - name: ai-travel-planner-frontend
+    newName: REGION-docker.pkg.dev/PROJECT_ID/travel-planner/frontend
+    newTag: REPLACE_WITH_GIT_SHA

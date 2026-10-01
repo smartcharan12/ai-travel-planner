@@ -26,7 +26,7 @@ class CostBasis(StrEnum):
     """
 
     SOURCE = "source"  # quoted from a cited search result
-    ESTIMATE = "estimate"  # deterministic heuristic from app/services (Stage 2)
+    ESTIMATE = "estimate"  # developer default from app/planning/budget_rates.py, or an assumed unit
     UNKNOWN = "unknown"  # no reliable figure; user must check
 
 
@@ -46,3 +46,19 @@ class Source(StrictModel):
         if not value.startswith(("http://", "https://")):
             raise ValueError("source url must be http(s)")
         return value
+
+
+class PriceInfo(StrictModel):
+    """A price for a researched entity, kept together with its evidence.
+
+    ``quote`` is the exact text from the source (e.g. "₹2,500 per night") so a
+    human can check the number. Research prices are only ever ``source``:
+    the LLM is never allowed to estimate. A price that cannot be matched to its
+    source text is removed (``app/research/grounding.py``), not guessed.
+    """
+
+    amount: float | None = Field(default=None, ge=0)
+    currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
+    unit: str | None = Field(default=None, max_length=60, examples=["per night", "for two", "per person"])
+    quote: str = Field(max_length=200, description="Verbatim text from the cited source.")
+    basis: CostBasis = CostBasis.SOURCE

@@ -1,0 +1,31 @@
+# Keep the build context small and free of secrets.
+# Images COPY only what they need (requirements + app/ or frontend/), but anything
+# in the context is sent to the Docker daemon, so secrets must never be in it.
+
+# Secrets and credentials
+.env
+.env.*
+*.pem
+*-key.json
+service-account*.json
+
+# Version control, environments, caches
+.git
+.gitignore
+.venv
+venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.deepeval
+
+# Not needed at runtime
+tests
+evaluation
+docs
+monitoring
+scripts
+*.md
+docker-compose*.yml

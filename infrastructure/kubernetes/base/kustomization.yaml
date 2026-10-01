@@ -1,0 +1,18 @@
+# Base manifests shared by every environment. secret.example.yaml is intentionally NOT listed.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: travel-planner
+labels:
+  - pairs: {app.kubernetes.io/part-of: ai-travel-planner}
+    includeSelectors: false
+resources:
+  - namespace.yaml
+  - service-account.yaml
+  - configmap.yaml
+  - api-deployment.yaml
+  - api-service.yaml
+  - frontend-deployment.yaml
+  - frontend-service.yaml
+  - hpa.yaml
+  - pdb.yaml
+  - network-policy.yaml

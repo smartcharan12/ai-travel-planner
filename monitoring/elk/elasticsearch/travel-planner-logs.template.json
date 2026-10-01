@@ -1,0 +1,86 @@
+{
+  "index_patterns": ["travel-planner-logs-*"],
+  "priority": 200,
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0
+    },
+    "mappings": {
+      "dynamic_templates": [
+        {
+          "strings_as_keywords": {
+            "match_mapping_type": "string",
+            "mapping": { "type": "keyword", "ignore_above": 1024 }
+          }
+        }
+      ],
+      "properties": {
+        "@timestamp": { "type": "date" },
+        "level": { "type": "keyword" },
+        "severity": { "type": "keyword" },
+        "service": { "type": "keyword" },
+        "logger": { "type": "keyword" },
+        "event_type": { "type": "keyword" },
+        "message": { "type": "text" },
+        "request_id": { "type": "keyword" },
+        "pipeline": { "type": "keyword" },
+
+        "route": { "type": "keyword" },
+        "method": { "type": "keyword" },
+        "status": { "type": "integer" },
+        "latency_ms": { "type": "float" },
+        "error_code": { "type": "keyword" },
+        "error_type": { "type": "keyword" },
+        "cause_type": { "type": "keyword" },
+        "stack_trace": { "type": "text", "index": false },
+        "details": { "type": "object", "enabled": false },
+
+        "destination": { "type": "keyword" },
+        "stage": { "type": "keyword" },
+        "demo_mode": { "type": "boolean" },
+        "model": { "type": "keyword" },
+        "search_provider": { "type": "keyword" },
+        "llm_call_count": { "type": "integer" },
+        "search_call_count": { "type": "integer" },
+        "repair_attempts": { "type": "integer" },
+
+        "purpose": { "type": "keyword" },
+        "attempt": { "type": "integer" },
+        "outcome": { "type": "keyword" },
+        "input_tokens": { "type": "long" },
+        "output_tokens": { "type": "long" },
+        "total_tokens": { "type": "long" },
+        "estimated_cost_usd": { "type": "float" },
+
+        "provider": { "type": "keyword" },
+        "category": { "type": "keyword" },
+        "result_count": { "type": "integer" },
+
+        "hits": { "type": "integer" },
+        "extracted": { "type": "integer" },
+        "accepted": { "type": "integer" },
+        "rejected": { "type": "integer" },
+        "rejection_reasons": { "type": "keyword" },
+        "prices_removed": { "type": "integer" },
+
+        "passed": { "type": "boolean" },
+        "error_codes": { "type": "keyword" },
+        "warning_codes": { "type": "keyword" },
+        "reasons": { "type": "keyword" },
+
+        "num_days": { "type": "integer" },
+        "num_travelers": { "type": "integer" },
+        "travel_style": { "type": "keyword" },
+        "llm_calls": { "type": "integer" },
+        "final_validation": { "type": "keyword" },
+        "grounded_activity_ratio": { "type": "float" },
+        "within_budget": { "type": "boolean" },
+        "budget_complete": { "type": "boolean" },
+        "search_latency_ms": { "type": "float" },
+        "llm_latency_ms": { "type": "float" },
+        "total_latency_ms": { "type": "float" }
+      }
+    }
+  }
+}

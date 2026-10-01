@@ -1,0 +1,117 @@
+# Local development stack. Explained in docs/22_docker_compose.md.
+#
+#   docker compose up --build                  # API + Streamlit
+#   docker compose --profile elk up --build    # + Elasticsearch, Logstash, Kibana (needs ~3 GB RAM)
+#
+# Secrets: put GEMINI_API_KEY / TAVILY_API_KEY (or DEMO_MODE=true) in .env. The file is read at
+# RUN time by the api service only; it is never copied into an image.
+# Ports are bound to 127.0.0.1: reachable from this machine, not from the network.
+
+name: ai-travel-planner
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
+    image: ai-travel-planner-api:local
+    env_file:
+      - path: .env
+        required: false          # compose >= 2.24; without .env the API starts and reports 503s
+    environment:
+      LOG_FORMAT: json
+      LOG_FILE: /var/log/app/app.jsonl   # tailed by Logstash through the shared volume
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - app-logs:/var/log/app
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    image: ai-travel-planner-frontend:local
+    environment:
+      API_BASE_URL: http://api:8000      # service name = DNS name on the compose network
+    ports:
+      - "127.0.0.1:8501:8501"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---------------- ELK (optional profile) ----------------
+  elasticsearch:
+    image: elasticsearch:8.19.22
+    profiles: ["elk"]
+    environment:
+      discovery.type: single-node        # one node, skips production bootstrap checks
+      xpack.security.enabled: "false"    # LOCAL DEVELOPMENT ONLY: no auth, no TLS
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    ports:
+      - "127.0.0.1:9200:9200"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+
+  logstash:
+    image: logstash:8.19.22
+    profiles: ["elk"]
+    environment:
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      LS_JAVA_OPTS: -Xms256m -Xmx256m
+    volumes:
+      - ./monitoring/elk/logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml:ro
+      - ./monitoring/elk/logstash/pipeline:/usr/share/logstash/pipeline:ro
+      - ./monitoring/elk/elasticsearch/travel-planner-logs.template.json:/usr/share/logstash/templates/travel-planner-logs.json:ro
+      - app-logs:/var/log/app:ro
+      - logstash-data:/usr/share/logstash/data
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9600 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+
+  kibana:
+    image: kibana:8.19.22
+    profiles: ["elk"]
+    environment:
+      ELASTICSEARCH_HOSTS: '["http://elasticsearch:9200"]'
+    ports:
+      - "127.0.0.1:5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:5601/api/status || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+
+  elk-setup:                           # one-shot: creates the Kibana data view + saved searches
+    image: curlimages/curl:8.22.0
+    profiles: ["elk"]
+    entrypoint: ["/bin/sh", "/setup/setup.sh"]
+    environment:
+      KIBANA_URL: http://kibana:5601
+    volumes:
+      - ./monitoring/elk/kibana/setup.sh:/setup/setup.sh:ro
+    depends_on:
+      kibana:
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  app-logs:        # API writes JSON logs; Logstash reads them
+  es-data:         # Elasticsearch indices survive `docker compose down` (not `down -v`)
+  logstash-data:   # Logstash read position (sincedb)

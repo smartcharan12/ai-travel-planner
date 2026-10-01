@@ -4,16 +4,28 @@ Import from here (``from app.schemas import TravelRequest``) rather than from
 the individual modules, so files can be reorganised without breaking callers.
 """
 
-from app.schemas.common import CostBasis, Source
+from app.schemas.common import CostBasis, PriceInfo, Source
+from app.schemas.extraction import (
+    ExtractedAttraction,
+    ExtractedDestinationInfo,
+    ExtractedHotel,
+    ExtractedPrice,
+    ExtractedRestaurant,
+    ExtractedTransportation,
+    ResearchExtraction,
+)
 from app.schemas.itinerary import (
     AccommodationChoice,
     Activity,
     ActivityType,
     BudgetBreakdown,
+    BudgetLineItem,
     DailyPlan,
+    GenericActivity,
     Itinerary,
     TimeSlot,
 )
+from app.schemas.planning import DraftActivity, DraftDay, ItineraryDraft
 from app.schemas.request import (
     AccommodationType,
     DietaryPreference,
@@ -25,9 +37,14 @@ from app.schemas.request import (
 )
 from app.schemas.research import (
     Attraction,
+    CategorySearchSummary,
     DestinationInfo,
+    GroundingReport,
     Hotel,
+    RejectedEntity,
+    RemovedPrice,
     ResearchCategory,
+    ResearchQuery,
     ResearchResult,
     Restaurant,
     SearchHit,
@@ -41,6 +58,7 @@ from app.schemas.response import (
     MetricsResponse,
     PlanMetadata,
     QualityReport,
+    ResearchResponse,
     TravelResponse,
     ValidationIssue,
     VersionResponse,
@@ -53,12 +71,25 @@ __all__ = [
     "ActivityType",
     "Attraction",
     "BudgetBreakdown",
+    "BudgetLineItem",
+    "DraftActivity",
+    "DraftDay",
+    "ItineraryDraft",
+    "CategorySearchSummary",
     "CostBasis",
     "DailyPlan",
     "DestinationInfo",
     "DietaryPreference",
     "ErrorBody",
     "ErrorResponse",
+    "ExtractedAttraction",
+    "ExtractedDestinationInfo",
+    "ExtractedHotel",
+    "ExtractedPrice",
+    "ExtractedRestaurant",
+    "ExtractedTransportation",
+    "GenericActivity",
+    "GroundingReport",
     "HealthResponse",
     "Hotel",
     "IssueSeverity",
@@ -66,8 +97,14 @@ __all__ = [
     "MetricsResponse",
     "Pace",
     "PlanMetadata",
+    "PriceInfo",
     "QualityReport",
+    "RejectedEntity",
+    "RemovedPrice",
     "ResearchCategory",
+    "ResearchExtraction",
+    "ResearchQuery",
+    "ResearchResponse",
     "ResearchResult",
     "Restaurant",
     "SearchHit",

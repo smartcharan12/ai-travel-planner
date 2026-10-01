@@ -9,6 +9,7 @@ from pydantic import Field
 
 from app.schemas.common import Source, StrictModel
 from app.schemas.itinerary import BudgetBreakdown, Itinerary
+from app.schemas.research import CategorySearchSummary, GroundingReport, ResearchResult, SearchHit
 
 
 class IssueSeverity(StrEnum):
@@ -26,7 +27,7 @@ class ValidationIssue(StrictModel):
 class QualityReport(StrictModel):
     """Cheap, deterministic quality signals computed on every request.
 
-    These are not a substitute for offline DeepEval runs (Stage 3); they are
+    These are not a substitute for offline DeepEval runs (Stage 4); they are
     the always-on smoke alarm, the offline evaluation is the full inspection.
     """
 
@@ -34,10 +35,13 @@ class QualityReport(StrictModel):
         ge=0, le=1, description="Share of activities that reference a researched place."
     )
     sourced_cost_ratio: float = Field(
-        ge=0, le=1, description="Share of priced items whose price came from a source."
+        ge=0, le=1, description="Share of the budget total (by amount) that comes from source-quoted prices."
     )
     repair_attempts: int = Field(ge=0)
     issues: list[ValidationIssue] = Field(default_factory=list)
+    optimization_notes: list[str] = Field(
+        default_factory=list, description="Changes the deterministic optimizer made to the LLM's draft."
+    )
 
 
 class PlanMetadata(StrictModel):
@@ -55,15 +59,47 @@ class PlanMetadata(StrictModel):
 
 
 class TravelResponse(StrictModel):
+    """Stage 3 answer from POST /api/v1/plan: the itinerary plus everything needed to audit it."""
+
     request_id: str
+    stage: Literal["itinerary"] = "itinerary"
     status: Literal["success", "partial"] = Field(
         description="'partial' = plan produced but some research failed (see warnings)."
     )
+    data_mode: Literal["live", "demo"]
+    notice: str
     itinerary: Itinerary
     budget: BudgetBreakdown
+    research: ResearchResult = Field(description="The verified places the itinerary was allowed to use.")
     sources: list[Source]
+    search_summary: list[CategorySearchSummary]
+    grounding: GroundingReport
     warnings: list[str] = Field(default_factory=list)
     quality: QualityReport
+    metadata: PlanMetadata
+
+
+class ResearchResponse(StrictModel):
+    """Answer from POST /api/v1/research: verified research only, no itinerary.
+
+    Shows the whole chain so a reader can audit it:
+    queries (search_summary) -> normalized results (search_results)
+    -> LLM extraction checked against sources (grounding) -> research.
+    """
+
+    request_id: str
+    stage: Literal["research"] = "research"
+    status: Literal["success", "partial"] = Field(
+        description="'partial' = at least one research category failed or returned nothing."
+    )
+    data_mode: Literal["live", "demo"]
+    notice: str = Field(description="Human-readable statement of what this data is (and is not).")
+    research: ResearchResult
+    search_summary: list[CategorySearchSummary]
+    search_results: list[SearchHit]
+    grounding: GroundingReport
+    warnings: list[str] = Field(default_factory=list)
+    next_step: str
     metadata: PlanMetadata
 
 

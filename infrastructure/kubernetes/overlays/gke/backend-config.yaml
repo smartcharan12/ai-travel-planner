@@ -1,0 +1,15 @@
+# Google Cloud load balancer settings for the Streamlit Service.
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: frontend
+spec:
+  # Streamlit keeps a websocket open per browser session. The default 30 s backend timeout
+  # would cut it; allow up to 1 hour.
+  timeoutSec: 3600
+  connectionDraining: {drainingTimeoutSec: 30}
+  healthCheck: {type: HTTP, requestPath: /_stcore/health, port: 8501}
+  # If the UI is ever scaled beyond 1 replica, keep each browser on the same pod.
+  sessionAffinity: {affinityType: GENERATED_COOKIE, affinityCookieTtlSec: 3600}
+  # Edge protection (recommended for production; create the policy first, docs/25_security.md):
+  # securityPolicy: {name: travel-planner-armor}

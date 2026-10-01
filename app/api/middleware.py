@@ -3,30 +3,35 @@
 Responsibilities:
 1. give each request a ``request_id`` (reuse a safe incoming X-Request-ID,
    otherwise generate one) so a single plan can be traced across logs
-2. measure total latency and record per-route metrics
-3. echo the id back in the ``X-Request-ID`` response header so a user can
+2. create the per-request ``RequestStats`` that the workflow fills in
+   (destination, LLM/search call counts, tokens, error code...)
+3. measure latency, record metrics, and write ONE ``request_completed``
+   JSON log line per request
+4. echo the id back in the ``X-Request-ID`` response header so a user can
    quote it in a bug report and we can find the exact log lines
 """
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from contextvars import ContextVar
 
 from fastapi import Request, Response
 
+from app.observability.context import RequestStats, request_id_var, request_stats_var
+from app.observability.logging import log_event
 from app.observability.metrics import metrics
 
-# ContextVar = a "global" that is private to the current request, even when
-# many requests run concurrently. Logging (Stage 4) reads it automatically.
-request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
+logger = logging.getLogger("app.request")
 
 # Only accept short, boring ids from clients; anything else could be used to
 # inject fake lines into our logs.
 _SAFE_ID = re.compile(r"^[A-Za-z0-9\-]{8,64}$")
+# Polling endpoints would flood the logs; they are still counted in metrics.
+_QUIET_ROUTES = {"/api/v1/health", "/api/v1/health/ready", "/api/v1/metrics"}
 
 
 def _route_template(request: Request) -> str:
@@ -40,7 +45,9 @@ async def request_context_middleware(
 ) -> Response:
     incoming = request.headers.get("x-request-id", "")
     request_id = incoming if _SAFE_ID.match(incoming) else uuid.uuid4().hex
-    token = request_id_var.set(request_id)
+    id_token = request_id_var.set(request_id)
+    stats = RequestStats(request_id=request_id)
+    stats_token = request_stats_var.set(stats)
     request.state.request_id = request_id
 
     started = time.perf_counter()
@@ -50,9 +57,33 @@ async def request_context_middleware(
         status_code = response.status_code
         response.headers["X-Request-ID"] = request_id
         return response
+    except Exception:
+        stats.error_code = stats.error_code or "INTERNAL_ERROR"
+        raise
     finally:
         latency_ms = (time.perf_counter() - started) * 1000
-        labels = {"route": _route_template(request), "method": request.method}
+        route = _route_template(request)
+        labels = {"route": route, "method": request.method}
         metrics.increment("http_requests_total", {**labels, "status": str(status_code)})
         metrics.observe_ms("http_request_latency", latency_ms, labels)
-        request_id_var.reset(token)
+        if route not in _QUIET_ROUTES:
+            level = (
+                logging.ERROR
+                if status_code >= 500
+                else logging.WARNING
+                if status_code >= 400
+                else logging.INFO
+            )
+            log_event(
+                logger,
+                "request_completed",
+                f"{request.method} {route} -> {status_code}",
+                level=level,
+                route=route,
+                method=request.method,
+                status=status_code,
+                latency_ms=round(latency_ms, 1),
+                **stats.as_log_fields(),
+            )
+        request_stats_var.reset(stats_token)
+        request_id_var.reset(id_token)

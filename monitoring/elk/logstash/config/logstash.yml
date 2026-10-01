@@ -1,0 +1,6 @@
+# Minimal Logstash settings for local development.
+http.host: "0.0.0.0"              # monitoring API on :9600 (used by the compose healthcheck)
+xpack.monitoring.enabled: false   # no self-monitoring cluster locally
+# Our events have their own field names (event_type, level, ...). Disabling ECS
+# compatibility stops Logstash from adding ECS fields that would clash with them.
+pipeline.ecs_compatibility: disabled

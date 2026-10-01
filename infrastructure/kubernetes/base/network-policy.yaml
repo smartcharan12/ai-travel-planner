@@ -1,0 +1,45 @@
+# Default deny, then allow only the traffic the design needs:
+#   internet/LB -> frontend:8501 -> api:8000 -> Gemini/Tavily (HTTPS) ; both -> DNS
+# Enforced only if the cluster's network plugin supports NetworkPolicy (GKE Dataplane V2 /
+# Autopilot: yes; kind's default CNI: no, see docs/23).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend
+spec:
+  podSelector: {matchLabels: {app: frontend}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports: [{port: 8501, protocol: TCP}]           # from the load balancer / port-forward
+  egress:
+    - to: [{podSelector: {matchLabels: {app: api}}}]
+      ports: [{port: 8000, protocol: TCP}]
+    - to: [{namespaceSelector: {}}]                  # DNS (kube-dns / node-local DNS)
+      ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api
+spec:
+  podSelector: {matchLabels: {app: api}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app: frontend}}}]
+      ports: [{port: 8000, protocol: TCP}]
+  egress:
+    - to: [{namespaceSelector: {}}]                  # DNS
+      ports: [{port: 53, protocol: UDP}, {port: 53, protocol: TCP}]
+    - to:                                            # Gemini and Tavily over HTTPS only
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [169.254.169.254/32]             # the app never needs the cloud metadata server
+      ports: [{port: 443, protocol: TCP}]

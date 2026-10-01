@@ -11,17 +11,21 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
+from app.api.dependencies import get_planner, get_research_planner
+from app.api.limits import enforce_limits
 from app.config import Settings, get_settings
-from app.core.exceptions import PlannerNotReadyError
 from app.observability.metrics import metrics
 from app.schemas import (
     ErrorResponse,
     HealthResponse,
     MetricsResponse,
+    ResearchResponse,
     TravelRequest,
     TravelResponse,
     VersionResponse,
 )
+from app.services.research_planner import ResearchPlanner
+from app.services.travel_planner import TravelPlanner
 
 router = APIRouter(prefix="/api/v1")
 
@@ -84,18 +88,35 @@ def get_metrics() -> MetricsResponse:
     response_model=TravelResponse,
     responses=_PLAN_ERRORS,
     tags=["planner"],
+    dependencies=[Depends(enforce_limits)],
 )
-def create_plan(
+async def create_plan(
     travel_request: TravelRequest,
     request: Request,
-    settings: Settings = Depends(get_settings),
+    planner: TravelPlanner = Depends(get_planner),
 ) -> TravelResponse:
-    """Generate a researched, validated, budgeted itinerary.
+    """Research the trip, plan it day by day, validate it and compute the budget.
 
     By the time this function runs, FastAPI has already parsed the JSON body
     into a ``TravelRequest`` and rejected anything invalid with a 422.
-
-    Stage 1: validation only. Stage 2 replaces the raise below with a call to
-    the LangGraph planning workflow.
     """
-    raise PlannerNotReadyError(details={"destination": travel_request.destination})
+    return await planner.run(travel_request, request_id=request.state.request_id)
+
+
+@router.post(
+    "/research",
+    response_model=ResearchResponse,
+    responses=_PLAN_ERRORS,
+    tags=["planner"],
+    dependencies=[Depends(enforce_limits)],
+)
+async def create_research(
+    travel_request: TravelRequest,
+    request: Request,
+    planner: ResearchPlanner = Depends(get_research_planner),
+) -> ResearchResponse:
+    """Research only: live search -> Gemini extraction -> verification against sources.
+
+    The first half of /plan, exposed separately to inspect research quality.
+    """
+    return await planner.run(travel_request, request_id=request.state.request_id)
